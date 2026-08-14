@@ -1,0 +1,10 @@
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
+.env
+.env.example
+.api-key-generated.txt
+.git/
+.github/
+logs/
+*.log

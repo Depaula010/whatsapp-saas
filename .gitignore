@@ -1,0 +1,12 @@
+# Pasta de bibliotecas do Node.js (OBRIGATÓRIO)
+node_modules/
+
+# Pasta de sessão do WhatsApp (OBRIGATÓRIO)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# API key gerada pela migração (NUNCA commitar)
+.api-key-generated.txt
+
+# Variáveis de ambiente
+.env

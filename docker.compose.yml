@@ -1,0 +1,33 @@
+name: whatsapp-saas
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-saas-bot
+    restart: always
+    ports:
+      - "3001:3000"
+    networks:
+      - rede-global
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # A URL agora aponta para o postgres-central (definido no seu .env)
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_SSL=${DB_SSL:-false}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - WEBHOOK_SIGNATURE_KEY=${WEBHOOK_SIGNATURE_KEY}
+      - PYTHON_API_URL=${PYTHON_API_URL:-http://meu-secretario-api:8000}
+      - REDIS_HOST=${REDIS_HOST:-}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+
+# A rede global é necessária para ele "ver" o postgres-central
+networks:
+  rede-global:
+    external: true
