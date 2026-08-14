@@ -107,6 +107,81 @@ function sha256(data) {
     return crypto.createHash('sha256').update(data).digest('hex');
 }
 
+// ========================================
+// Criptografia das credenciais do WhatsApp (baileys_auth)
+// ========================================
+// AES-256-GCM: quem tiver só acesso de leitura ao Postgres não consegue
+// reconstruir a sessão do WhatsApp sem a AUTH_ENCRYPTION_KEY (que vive
+// somente no .env do servidor, nunca no banco).
+
+const AUTH_ENC_ALGORITHM = 'aes-256-gcm';
+const AUTH_ENC_IV_LENGTH = 12; // recomendado para GCM
+
+let cachedAuthKey = null;
+
+/**
+ * Deriva uma chave de 32 bytes a partir de AUTH_ENCRYPTION_KEY (qualquer
+ * tamanho/formato) via SHA-256, para sempre bater com o requisito do AES-256.
+ * @returns {Buffer}
+ */
+function getAuthEncryptionKey() {
+    if (cachedAuthKey) return cachedAuthKey;
+
+    const raw = process.env.AUTH_ENCRYPTION_KEY;
+
+    if (!raw) {
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('AUTH_ENCRYPTION_KEY não configurada. Obrigatória em produção para cifrar as credenciais do WhatsApp em repouso.');
+        }
+        // Dev: gera uma chave efêmera (não persiste entre reinícios, mas
+        // evita exigir configuração extra em ambiente local descartável).
+        cachedAuthKey = crypto.randomBytes(32);
+        return cachedAuthKey;
+    }
+
+    cachedAuthKey = crypto.createHash('sha256').update(raw).digest();
+    return cachedAuthKey;
+}
+
+/**
+ * Cifra uma string (credenciais/keys do Baileys serializadas) com AES-256-GCM.
+ * @param {string} plaintext
+ * @returns {string} "iv:authTag:ciphertext" em base64, um único campo TEXT
+ */
+function encryptAuthData(plaintext) {
+    const key = getAuthEncryptionKey();
+    const iv = crypto.randomBytes(AUTH_ENC_IV_LENGTH);
+    const cipher = crypto.createCipheriv(AUTH_ENC_ALGORITHM, key, iv);
+
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return `${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted.toString('base64')}`;
+}
+
+/**
+ * Decifra um valor gerado por encryptAuthData.
+ * @param {string} stored - "iv:authTag:ciphertext" em base64
+ * @returns {string} plaintext original
+ */
+function decryptAuthData(stored) {
+    const [ivB64, authTagB64, dataB64] = stored.split(':');
+    if (!ivB64 || !authTagB64 || !dataB64) {
+        throw new Error('Formato de dado cifrado inválido');
+    }
+
+    const key = getAuthEncryptionKey();
+    const decipher = crypto.createDecipheriv(AUTH_ENC_ALGORITHM, key, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(authTagB64, 'base64'));
+
+    const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(dataB64, 'base64')),
+        decipher.final()
+    ]);
+
+    return decrypted.toString('utf8');
+}
+
 module.exports = {
     generateApiKey,
     extractKeyPrefix,
@@ -116,5 +191,7 @@ module.exports = {
     verifyWebhookSignature,
     generateUUID,
     generateRandomToken,
-    sha256
+    sha256,
+    encryptAuthData,
+    decryptAuthData
 };

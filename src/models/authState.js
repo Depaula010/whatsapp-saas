@@ -5,6 +5,7 @@
 
 const { initAuthCreds, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
 const { pool } = require('../config/database');
+const { encryptAuthData, decryptAuthData } = require('../utils/crypto');
 const pino = require('pino');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
@@ -76,12 +77,16 @@ async function createAuthState(sessionUuid) {
      * Com retry para evitar race conditions
      */
     const upsertAuthData = async (dataKey, dataValue, retries = 3) => {
+        // Cifra antes de gravar — quem só tem acesso ao banco não reconstrói
+        // a sessão do WhatsApp sem a AUTH_ENCRYPTION_KEY (fica só no .env).
+        const encryptedValue = encryptAuthData(dataValue);
+
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
                 const updateResult = await pool.query(
                     `UPDATE baileys_auth SET data_value = $3, updated_at = NOW()
                      WHERE session_uuid = $1 AND data_key = $2`,
-                    [sessionUuid, dataKey, dataValue]
+                    [sessionUuid, dataKey, encryptedValue]
                 );
 
                 if (updateResult.rowCount === 0) {
@@ -89,7 +94,7 @@ async function createAuthState(sessionUuid) {
                         `INSERT INTO baileys_auth (session_id, session_uuid, data_key, data_value)
                          VALUES ($1, $2, $3, $4)
                          ON CONFLICT (session_uuid, data_key) DO UPDATE SET data_value = $4, updated_at = NOW()`,
-                        [sessionId, sessionUuid, dataKey, dataValue]
+                        [sessionId, sessionUuid, dataKey, encryptedValue]
                     );
                 }
                 return; // Sucesso, sai do loop
@@ -129,8 +134,10 @@ async function createAuthState(sessionUuid) {
                 if (!data_value) continue;
 
                 try {
+                    // Decifra antes de deserializar (ver upsertAuthData)
+                    const decryptedValue = decryptAuthData(data_value);
                     // Usar nosso bufferReviver para deserialização correta
-                    const parsedValue = JSON.parse(data_value, bufferReviver);
+                    const parsedValue = JSON.parse(decryptedValue, bufferReviver);
 
                     if (data_key === 'creds') {
                         // Mesclar com creds existentes (mantém campos que não foram salvos)

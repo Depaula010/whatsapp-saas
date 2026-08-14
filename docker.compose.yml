@@ -21,6 +21,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - DB_SSL=${DB_SSL:-false}
       - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - AUTH_ENCRYPTION_KEY=${AUTH_ENCRYPTION_KEY}
       - WEBHOOK_SIGNATURE_KEY=${WEBHOOK_SIGNATURE_KEY}
       - PYTHON_API_URL=${PYTHON_API_URL:-http://meu-secretario-api:8000}
       - REDIS_HOST=${REDIS_HOST:-}
