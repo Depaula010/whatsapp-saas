@@ -68,7 +68,14 @@ async function findByPrefix(keyPrefix) {
  * @returns {Promise<Object|null>} API key se válida, null caso contrário
  */
 async function validate(apiKey) {
-    const keyPrefix = extractKeyPrefix(apiKey);
+    let keyPrefix;
+    try {
+        keyPrefix = extractKeyPrefix(apiKey);
+    } catch {
+        // Chave malformada (curta demais, vazia, etc.) — inválida, não é um erro de servidor
+        return null;
+    }
+
     const keyRecord = await findByPrefix(keyPrefix);
 
     if (!keyRecord) {

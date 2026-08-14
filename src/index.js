@@ -34,8 +34,12 @@ const app = express();
 const port = process.env.PORT || 3000;
 const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
 
-// Trust proxy (necessário atrás de Docker/nginx para req.ip correto)
-app.set('trust proxy', parseInt(process.env.TRUST_PROXY || '1', 10));
+// Trust proxy: só habilite (TRUST_PROXY=1 ou mais) quando o bot estiver
+// atrás de um reverse proxy de verdade (Nginx/Traefik) que sobrescreve
+// X-Forwarded-For. Sem um proxy na frente, confiar nesse header permite
+// que qualquer requisição externa falsifique req.ip e contorne o rate
+// limiting por IP — por isso o padrão é 0 (não confiar em nenhum hop).
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY || '0', 10));
 
 // ========================================
 // MIDDLEWARES GLOBAIS

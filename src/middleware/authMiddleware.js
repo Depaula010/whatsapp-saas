@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const pino = require('pino');
 const ApiKey = require('../models/apiKey');
 const Session = require('../models/session');
+const { isValidUUID } = require('../utils/validation');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
 
@@ -60,6 +61,13 @@ async function authorizeSession(req, res, next) {
         return res.status(400).json({
             status: 'error',
             message: 'Missing session_id parameter'
+        });
+    }
+
+    if (!isValidUUID(sessionId)) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Invalid session_id format'
         });
     }
 

@@ -38,7 +38,7 @@ router.post('/',
             }
 
             // Validar webhook URL (prevenir SSRF)
-            if (!validateWebhookUrl(webhook_url)) {
+            if (!(await validateWebhookUrl(webhook_url))) {
                 return res.status(400).json({
                     status: 'error',
                     message: 'Invalid webhook URL. Must be a valid HTTP/HTTPS URL pointing to a public address.'

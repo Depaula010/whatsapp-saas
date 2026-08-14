@@ -10,6 +10,7 @@ const ApiKey = require('../models/apiKey');
 const Session = require('../models/session');
 const sessionManager = require('../services/sessionManager');
 const { generateApiKey } = require('../utils/crypto');
+const { isValidUUID } = require('../utils/validation');
 const { validateAdminKey } = require('../middleware/authMiddleware');
 const { createAdminRateLimiter, createAuthFailureRateLimiter } = require('../middleware/rateLimiter');
 
@@ -127,6 +128,11 @@ router.get('/api-keys', async (req, res) => {
 router.get('/api-keys/:key_id', async (req, res) => {
     try {
         const keyId = req.params.key_id;
+
+        if (!isValidUUID(keyId)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid key_id format' });
+        }
+
         const key = await ApiKey.findById(keyId);
 
         if (!key) {
@@ -167,6 +173,11 @@ router.get('/api-keys/:key_id', async (req, res) => {
 router.patch('/api-keys/:key_id', async (req, res) => {
     try {
         const keyId = req.params.key_id;
+
+        if (!isValidUUID(keyId)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid key_id format' });
+        }
+
         const updates = {};
 
         // Apenas campos permitidos
@@ -209,6 +220,11 @@ router.patch('/api-keys/:key_id', async (req, res) => {
 router.delete('/api-keys/:key_id', async (req, res) => {
     try {
         const keyId = req.params.key_id;
+
+        if (!isValidUUID(keyId)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid key_id format' });
+        }
+
         const permanent = req.query.permanent === 'true';
 
         if (permanent) {
