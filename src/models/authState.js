@@ -3,7 +3,8 @@
 // ========================================
 // Gerencia estado de autenticação do Baileys no PostgreSQL por session_uuid
 
-const { initAuthCreds, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { initAuthCreds, makeCacheableSignalKeyStore, proto } = require('@whiskeysockets/baileys');
+const { parseKeyDataKey, buildKeyDataKey } = require('./keyStoreLayout');
 const { pool } = require('../config/database');
 const { encryptAuthData, decryptAuthData } = require('../utils/crypto');
 const pino = require('pino');
@@ -144,18 +145,18 @@ async function createAuthState(sessionUuid) {
                         Object.assign(authState.creds, parsedValue);
                         credsParsed = true;
                     } else if (data_key.startsWith('key-')) {
-                        // Estrutura de keys do Baileys
-                        const keyPath = data_key.replace('key-', '').split('-');
-                        let target = authState.keys;
-
-                        for (let i = 0; i < keyPath.length - 1; i++) {
-                            if (!target[keyPath[i]]) {
-                                target[keyPath[i]] = {};
-                            }
-                            target = target[keyPath[i]];
+                        // Chaves do Signal: mapa plano authState.keys[categoria][id]. O nome tem hífen (categoria) e pode ter
+                        // ponto/hífen (id), então o prefixo é reconhecido por keyStoreLayout (antes quebrava em "-" e deixava
+                        // pre-keys e sessões ilegíveis depois de qualquer reconexão).
+                        const parsedKey = parseKeyDataKey(data_key);
+                        if (!parsedKey) {
+                            logger.warn({ dataKey: data_key }, 'Chave com categoria desconhecida - ignorada');
+                            continue;
                         }
-
-                        target[keyPath[keyPath.length - 1]] = parsedValue;
+                        if (!authState.keys[parsedKey.category]) {
+                            authState.keys[parsedKey.category] = {};
+                        }
+                        authState.keys[parsedKey.category][parsedKey.id] = parsedValue;
                     }
                 } catch (parseError) {
                     logger.error({ err: parseError, dataKey: data_key }, 'Erro ao parsear auth data');
@@ -213,8 +214,8 @@ async function createAuthState(sessionUuid) {
      * @param {string} keyPath - Caminho da chave (ex: 'app-state-sync-key-AAAAAAA')
      * @param {*} value - Valor da chave
      */
-    const saveKey = async (keyPath, value) => {
-        const dataKey = `key-${keyPath}`;
+    const saveKey = async (dataKey, value) => {
+        const keyPath = dataKey;
 
         try {
             if (value === null || value === undefined) {
@@ -254,22 +255,15 @@ async function createAuthState(sessionUuid) {
             get: async (type, ids) => {
                 const data = {};
                 for (const id of ids) {
-                    const keyPath = `${type}.${id}`;
-                    const parts = keyPath.split('.');
-                    let target = authState.keys;
-
-                    for (const part of parts) {
-                        if (target && target[part] !== undefined) {
-                            target = target[part];
-                        } else {
-                            target = undefined;
-                            break;
-                        }
+                    let value = authState.keys[type]?.[id];
+                    if (value === undefined || value === null) {
+                        continue;
                     }
-
-                    if (target !== undefined) {
-                        data[id] = target;
+                    if (type === 'app-state-sync-key') {
+                        // Mesmo tratamento do useMultiFileAuthState do Baileys.
+                        value = proto.Message.AppStateSyncKeyData.fromObject(value);
                     }
+                    data[id] = value;
                 }
                 return data;
             },
@@ -279,17 +273,20 @@ async function createAuthState(sessionUuid) {
 
                 for (const category in data) {
                     for (const id in data[category]) {
-                        const keyPath = `${category}-${id}`;
                         const value = data[category][id];
 
-                        // Atualizar em memória primeiro
+                        // Atualizar em memória primeiro (null/undefined = chave apagada)
                         if (!authState.keys[category]) {
                             authState.keys[category] = {};
                         }
-                        authState.keys[category][id] = value;
+                        if (value === null || value === undefined) {
+                            delete authState.keys[category][id];
+                        } else {
+                            authState.keys[category][id] = value;
+                        }
 
                         // Agendar salvamento no banco
-                        savePromises.push(saveKey(keyPath, value));
+                        savePromises.push(saveKey(buildKeyDataKey(category, id), value));
                     }
                 }
 
