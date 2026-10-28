@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+
+# Um deploy por vez: dois merges seguidos entram em fila (sem cancelar o que já está rodando).
+concurrency:
+  group: deploy-whatsapp-saas
+  cancel-in-progress: false
 
 jobs:
+  # Roda em todo PR e em todo push na main. O deploy só acontece se os testes passarem.
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   deploy:
+    name: Deploy
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -18,31 +42,35 @@ jobs:
           key: ${{ secrets.VPS_PRIVATE_KEY }}
           port: 22
           script: |
-            # 1. Entrar na pasta do projeto
+            set -e
+
+            # Servidor compartilhado: só mexe neste projeto. Nunca `docker system prune` nem `down` antes do build.
             cd /root/whatsapp-saas
 
-            # 2. Atualizar o código (git pull)
-            # Como a chave pública está configurada no Repo, ele tem permissão de leitura
+            # 1. Atualizar o código
             git fetch origin
             git checkout main
             git pull origin main
 
-            # 3. Garantir que a rede externa existe (evita erro no docker-compose)
+            # 2. Garantir que a rede externa existe
             docker network create rede-global || true
 
-            # 4. Parar o container atual para garantir limpeza
-            docker compose -f docker.compose.yml down || true
+            # 3. Anotar as imagens atuais deste projeto (para remover só as antigas no fim)
+            OLD_IMAGES=$(docker compose -f docker.compose.yml images -q 2>/dev/null | sort -u | xargs echo || true)
 
-            # 5. Recriar os containers com a nova versão (FORÇANDO rebuild completo)
-            # --no-cache: ignora cache de build (garante código novo)
-            # --force-recreate: recria o container mesmo se não detectar mudança
+            # 4. Build ANTES de qualquer parada: o bot atual segue atendendo durante o build. Se o build falhar,
+            #    o `set -e` para aqui e a versão em produção continua no ar.
             docker compose -f docker.compose.yml build --no-cache
-            docker compose -f docker.compose.yml up -d --force-recreate --remove-orphans
 
-            # 6. Limpar imagens antigas para não lotar o disco da Contabo
-            docker image prune -f
+            # 5. Recria só o que mudou (queda de segundos, e as sessões reconectam sozinhas)
+            docker compose -f docker.compose.yml up -d --remove-orphans
 
-            # 7. Verificar se o container subiu corretamente
+            # 6. Verificar se o container subiu corretamente
             echo "🔍 Verificando status do container..."
             sleep 5
             docker compose -f docker.compose.yml ps
+
+            # 7. Só depois de subir: remove as imagens ANTIGAS deste projeto (sem -f, nunca apaga imagem em uso) e,
+            #    por label, as soltas deste projeto. Sem prune global.
+            for img in $OLD_IMAGES; do docker image rm "$img" > /dev/null 2>&1 || true; done
+            docker image prune -f --filter "label=app=whatsapp-saas" > /dev/null || true

@@ -2,7 +2,10 @@ name: whatsapp-saas
 
 services:
   whatsapp-bot:
-    build: .
+    build:
+      context: .
+      labels:
+        - app=whatsapp-saas   # o deploy limpa só as imagens soltas com este label (nunca `docker system prune`)
     container_name: whatsapp-saas-bot
     restart: always
     ports:
